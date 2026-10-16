@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slot preview</title>
+<style>
+body{font:14px/1.4 system-ui,sans-serif;margin:0;color:#1b1f23;background:#fff}
+.bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #d0d7de;padding:10px 16px;display:flex;gap:12px;align-items:center;z-index:2}
+button{font:inherit;padding:4px 12px;border:1px solid #0b57d0;background:#fff;color:#0b57d0;cursor:pointer}
+button.on{background:#0b57d0;color:#fff}
+.wrap{margin:0 auto;max-width:1400px}body.mobile .wrap{max-width:390px;border-inline:1px solid #d0d7de}
+section{border-bottom:1px solid #d0d7de;padding:10px 0}section>header{padding:0 12px 6px}section>header span{color:#57606a;font-size:12px}
+.row{display:flex;overflow-x:auto}.tile{flex:0 0 calc(100% / var(--dc));box-sizing:border-box;padding:0 2px}
+body.mobile .tile{flex-basis:calc(100% / var(--mc))}.tile img{width:100%;display:block}.tile small{color:#57606a;font-size:11px;word-break:break-all}
+.tile img.m{display:none}body.mobile .tile img.m{display:block}body.mobile .tile img.d{display:none}
+.imgerr{display:block;color:#a40e26;font-size:11px;word-break:break-all;padding:6px;border:1px dashed #a40e26}
+.rail,.miss{padding:12px;margin:0 12px;border:1px dashed #8c959f}.miss{color:#a40e26}pre{white-space:pre-wrap;font-size:11px}
+.msg{padding:24px 16px;color:#57606a}.msg.err{color:#a40e26}
+</style>
+</head>
+<body>
+<div class="bar"><b id="title">Slot preview</b><span id="count"></span>
+<button id="bd" class="on">Desktop</button><button id="bm">Mobile</button></div>
+<div class="wrap" id="app"><p class="msg">Loading…</p></div>
+<script>
+// Usage: index.html?api=<staging-domain>&content=<content-item-id or delivery key>
+// Localised fields arrive as { values: [{ locale, value }] }; pick English, else the first value.
+const val = v => {
+  if (v && typeof v === 'object' && Array.isArray(v.values)) {
+    const e = v.values.find(x => /^en/i.test(x.locale || '')) || v.values[0];
+    return e ? e.value : undefined;
+  }
+  return v;
+};
+const esc = s => {
+  s = val(s);
+  if (s && typeof s === 'object') s = JSON.stringify(s).slice(0, 120);
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+};
+const url = i => { i = val(i); return i && val(i.name) ? `https://${val(i.defaultHost)}/i/${val(i.endpoint)}/${encodeURIComponent(val(i.name))}?w=900` : ''; };
+const cols = l => parseFloat((String(l || '').match(/X([\d.]+)/) || [])[1]) || 1;
+
+function tile(b) {
+  if (!b || !b._meta) return '<div class="tile miss">Item could not be loaded.</div>';
+  const d = url(b.desktopImage), m = url(b.mobileImage) || d, link = (b.urlLinkList || [])[0] || '';
+  const bad = "var s=document.createElement('small');s.className='imgerr';s.textContent='Image failed to load: '+this.src;this.replaceWith(s)";
+  const pic = d
+    ? `<img class="d" loading="lazy" src="${esc(d)}" alt="" onerror="${bad}"><img class="m" loading="lazy" src="${esc(m)}" alt="" onerror="${bad}">`
+    : `<small class="imgerr">No image address found. desktopImage = ${esc(b.desktopImage ?? 'missing')}</small>`;
+  return `<div class="tile">${pic}<small>${esc(b._meta.name)}${link ? ' → ' + esc(link) : ''}</small></div>`;
+}
+
+function rail(it) {
+  const end = it.timerEndTime ? Date.parse(it.timerEndTime) : 0;
+  const timer = it.showTimer && it.timerStartTime
+    ? `Timer ${esc(it.timerStartTime)} to ${esc(it.timerEndTime)}${end && end < Date.now() ? ' <b>(ended)</b>' : ''}` : 'No timer';
+  return `<div class="rail" style="background:${esc(it.railBGColor || '#f3f3f3')}"><h3>${esc(it.productRailTitle || '(no title)')}</h3>` +
+    `<p>${timer}. Link: ${esc(val(it.link)?.url || '-')}</p><p>Products load from the commerce API on the live site and are not shown here.</p></div>`;
+}
+
+function section(it) {
+  const schema = (it._meta?.schema || '').split('/').pop();
+  let body;
+  if (it.rotatingImagesData) body = `<div class="row">${it.rotatingImagesData.map(tile).join('')}</div>`;
+  else if (it.trendingBanners) body = `<div class="row">${it.trendingBanners.map(tile).join('')}</div>`;
+  else if (schema === 'productrail.json' || it.productRailTitle) body = rail(it);
+  else body = `<div class="miss">No renderer for this type yet. Raw data:<pre>${esc(JSON.stringify(it, null, 1).slice(0, 700))}</pre></div>`;
+  return `<section style="--dc:${cols(it.desktopLayoutname)};--mc:${cols(it.mobileLayoutname)}"><header><b>${esc(it._meta?.name)}</b> ` +
+    `<span>${esc(schema)} | desktop ${esc(it.desktopLayoutname || '-')} | mobile ${esc(it.mobileLayoutname || '-')}</span></header>${body}</section>`;
+}
+
+function setMode(mobile) {
+  document.body.classList[mobile ? 'add' : 'remove']('mobile');
+  document.getElementById('bd').className = mobile ? '' : 'on';
+  document.getElementById('bm').className = mobile ? 'on' : '';
+}
+
+async function main() {
+  const app = document.getElementById('app');
+  const fail = t => { app.innerHTML = `<p class="msg err">${esc(t)}</p>`; };
+  document.getElementById('bd').onclick = () => setMode(false);
+  document.getElementById('bm').onclick = () => setMode(true);
+  setMode(innerWidth < 700);
+
+  const q = new URLSearchParams(location.search);
+  const api = (q.get('api') || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const content = q.get('content') || '';
+  if (!api || !content) return fail('Missing ?api= and ?content= in the URL.');
+  if (!/^[a-z0-9.-]+\.(bigcontent\.io|amplience\.net)$/i.test(api)) return fail('The api value must be an Amplience delivery domain.');
+
+  const kind = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(content) ? 'id' : 'key';
+  let res;
+  try { res = await fetch(`https://${api}/content/${kind}/${encodeURIComponent(content)}?depth=all&format=inlined`); }
+  catch (e) { return fail('Could not reach ' + api + '. Check your network, and that your IP is allowed for virtual staging.'); }
+  if (!res.ok) return fail(`Amplience returned HTTP ${res.status} for this slot. 404 = ID not found; 401/403 = access (IP allow list or preview key).`);
+
+  const slot = (await res.json()).content || {};
+  const items = slot.contentTypes || [];
+  document.getElementById('title').textContent = slot._meta?.name || 'Slot preview';
+  document.getElementById('count').textContent = items.length + ' items';
+  app.innerHTML = items.length ? items.map(section).join('') : '<p class="msg">This content has no items in <code>contentTypes</code>, so there is nothing to draw.</p>';
+}
+if (typeof document !== 'undefined' && document.getElementById) main();
+</script>
+</body>
+</html>
