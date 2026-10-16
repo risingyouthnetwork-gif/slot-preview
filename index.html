@@ -10,8 +10,10 @@ body{font:14px/1.4 system-ui,sans-serif;margin:0;color:#1b1f23;background:#fff}
 button{font:inherit;padding:4px 12px;border:1px solid #0b57d0;background:#fff;color:#0b57d0;cursor:pointer}
 button.on{background:#0b57d0;color:#fff}
 .wrap{margin:0 auto;max-width:1400px}body.mobile .wrap{max-width:390px;border-inline:1px solid #d0d7de}
-section{border-bottom:1px solid #d0d7de;padding:10px 0}section>header{padding:0 12px 6px}section>header span{color:#57606a;font-size:12px}
-.row{display:flex;overflow-x:auto}.tile{flex:0 0 calc(100% / var(--dc));box-sizing:border-box;padding:0 2px}
+section{padding:0}body.details section{border-bottom:1px solid #d0d7de;padding:10px 0}section>header{padding:0 12px 6px}section>header span{color:#57606a;font-size:12px}
+.bar b,.bar span{display:none}body.details .bar b,body.details .bar span{display:inline}
+.mini{padding:6px 12px;margin:0;border:0;font-size:12px;color:#57606a;background:#f6f8fa}
+.row{display:flex;overflow-x:auto}.tile{flex:0 0 calc(100% / var(--dc));box-sizing:border-box;padding:0}
 body.mobile .tile{flex-basis:calc(100% / var(--mc))}.tile img{width:100%;display:block}.tile small{color:#57606a;font-size:11px;word-break:break-all}
 .tile img.m{display:none}body.mobile .tile img.m{display:block}body.mobile .tile img.d{display:none}
 .imgerr{display:block;color:#a40e26;font-size:11px;word-break:break-all;padding:6px;border:1px dashed #a40e26}
@@ -33,6 +35,7 @@ const val = v => {
   }
   return v;
 };
+let DETAILS = false; // add ?details=1 to the URL to show names, links, timers and layouts
 const esc = s => {
   s = val(s);
   if (s && typeof s === 'object') s = JSON.stringify(s).slice(0, 120);
@@ -48,10 +51,12 @@ function tile(b) {
   const pic = d
     ? `<img class="d" loading="lazy" src="${esc(d)}" alt="" onerror="${bad}"><img class="m" loading="lazy" src="${esc(m)}" alt="" onerror="${bad}">`
     : `<small class="imgerr">No image address found. desktopImage = ${esc(b.desktopImage ?? 'missing')}</small>`;
-  return `<div class="tile">${pic}<small>${esc(b._meta.name)}${link ? ' → ' + esc(link) : ''}</small></div>`;
+  const cap = DETAILS ? `<small>${esc(b._meta.name)}${link ? ' → ' + esc(link) : ''}</small>` : '';
+  return `<div class="tile">${pic}${cap}</div>`;
 }
 
 function rail(it) {
+  if (!DETAILS) return `<div class="rail" style="background:${esc(it.railBGColor || '#f3f3f3')}"><h3>${esc(it.productRailTitle || 'Product rail')}</h3></div>`;
   const end = it.timerEndTime ? Date.parse(it.timerEndTime) : 0;
   const timer = it.showTimer && it.timerStartTime
     ? `Timer ${esc(it.timerStartTime)} to ${esc(it.timerEndTime)}${end && end < Date.now() ? ' <b>(ended)</b>' : ''}` : 'No timer';
@@ -65,9 +70,11 @@ function section(it) {
   if (it.rotatingImagesData) body = `<div class="row">${it.rotatingImagesData.map(tile).join('')}</div>`;
   else if (it.trendingBanners) body = `<div class="row">${it.trendingBanners.map(tile).join('')}</div>`;
   else if (schema === 'productrail.json' || it.productRailTitle) body = rail(it);
-  else body = `<div class="miss">No renderer for this type yet. Raw data:<pre>${esc(JSON.stringify(it, null, 1).slice(0, 700))}</pre></div>`;
-  return `<section style="--dc:${cols(it.desktopLayoutname)};--mc:${cols(it.mobileLayoutname)}"><header><b>${esc(it._meta?.name)}</b> ` +
-    `<span>${esc(schema)} | desktop ${esc(it.desktopLayoutname || '-')} | mobile ${esc(it.mobileLayoutname || '-')}</span></header>${body}</section>`;
+  else body = DETAILS
+    ? `<div class="miss">No renderer for this type yet. Raw data:<pre>${esc(JSON.stringify(it, null, 1).slice(0, 700))}</pre></div>`
+    : `<div class="mini">Not shown in preview: ${esc(schema || 'unknown type')}</div>`;
+  const head = DETAILS ? `<header><b>${esc(it._meta?.name)}</b> <span>${esc(schema)} | desktop ${esc(it.desktopLayoutname || '-')} | mobile ${esc(it.mobileLayoutname || '-')}</span></header>` : '';
+  return `<section style="--dc:${cols(it.desktopLayoutname)};--mc:${cols(it.mobileLayoutname)}">${head}${body}</section>`;
 }
 
 function setMode(mobile) {
@@ -84,6 +91,8 @@ async function main() {
   setMode(innerWidth < 700);
 
   const q = new URLSearchParams(location.search);
+  DETAILS = q.get('details') === '1';
+  if (DETAILS) document.body.classList.add('details');
   const api = (q.get('api') || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const content = q.get('content') || '';
   if (!api || !content) return fail('Missing ?api= and ?content= in the URL.');
