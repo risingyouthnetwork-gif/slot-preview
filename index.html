@@ -41,7 +41,14 @@ const esc = s => {
   if (s && typeof s === 'object') s = JSON.stringify(s).slice(0, 120);
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 };
-const url = i => { i = val(i); return i && val(i.name) ? `https://${val(i.defaultHost)}/i/${val(i.endpoint)}/${encodeURIComponent(val(i.name))}?w=900` : ''; };
+let MEDIA = ''; // staging media host; images published to a live host are read from staging so unpublished edits show
+const url = i => {
+  i = val(i);
+  if (!(i && val(i.name))) return '';
+  let h = val(i.defaultHost);
+  if (MEDIA && !/\.staging\.bigcontent\.io$/i.test(h)) h = MEDIA;
+  return `https://${h}/i/${val(i.endpoint)}/${encodeURIComponent(val(i.name))}?w=900`;
+};
 const cols = l => parseFloat((String(l || '').match(/X([\d.]+)/) || [])[1]) || 1;
 
 function tile(b) {
@@ -70,6 +77,12 @@ function section(it) {
   if (it.rotatingImagesData) body = `<div class="row">${it.rotatingImagesData.map(tile).join('')}</div>`;
   else if (it.trendingBanners) body = `<div class="row">${it.trendingBanners.map(tile).join('')}</div>`;
   else if (schema === 'productrail.json' || it.productRailTitle) body = rail(it);
+  else if (it.desktopImage || it.mobileImage) {
+    const tc = it.trendingCarousel;
+    const sub = tc && Array.isArray(tc.trendingBanners)
+      ? `<div class="row" style="--dc:${cols(tc.desktopLayoutname)};--mc:${cols(tc.mobileLayoutname)}">${tc.trendingBanners.map(tile).join('')}</div>` : '';
+    body = tile(it) + sub;
+  }
   else body = DETAILS
     ? `<div class="miss">No renderer for this type yet. Raw data:<pre>${esc(JSON.stringify(it, null, 1).slice(0, 700))}</pre></div>`
     : `<div class="mini">Not shown in preview: ${esc(schema || 'unknown type')}</div>`;
@@ -98,17 +111,24 @@ async function main() {
   if (!api || !content) return fail('Missing ?api= and ?content= in the URL.');
   if (!/^[a-z0-9.-]+\.(bigcontent\.io|amplience\.net)$/i.test(api)) return fail('The api value must be an Amplience delivery domain.');
 
+  MEDIA = q.get('media') === 'live' ? '' : api;
   const kind = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(content) ? 'id' : 'key';
   let res;
   try { res = await fetch(`https://${api}/content/${kind}/${encodeURIComponent(content)}?depth=all&format=inlined`); }
   catch (e) { return fail('Could not reach ' + api + '. Check your network, and that your IP is allowed for virtual staging.'); }
   if (!res.ok) return fail(`Amplience returned HTTP ${res.status} for this slot. 404 = ID not found; 401/403 = access (IP allow list or preview key).`);
 
-  const slot = (await res.json()).content || {};
-  const items = slot.contentTypes || [];
-  document.getElementById('title').textContent = slot._meta?.name || 'Slot preview';
+  const root = (await res.json()).content || {};
+  // A slot keeps its items in a list (flexibleslot uses contentTypes). Other schemas may use another
+  // property name, so take the first list of linked items; a single component is drawn on its own.
+  let items = root.contentTypes;
+  if (!Array.isArray(items)) {
+    const key = Object.keys(root).find(k => Array.isArray(root[k]) && root[k].some(x => x && x._meta && x._meta.schema));
+    items = key ? root[key] : [root];
+  }
+  document.getElementById('title').textContent = root._meta?.name || 'Slot preview';
   document.getElementById('count').textContent = items.length + ' items';
-  app.innerHTML = items.length ? items.map(section).join('') : '<p class="msg">This content has no items in <code>contentTypes</code>, so there is nothing to draw.</p>';
+  app.innerHTML = items.length ? items.map(section).join('') : '<p class="msg">Nothing to draw: the content has no items.</p>';
 }
 if (typeof document !== 'undefined' && document.getElementById) main();
 </script>
